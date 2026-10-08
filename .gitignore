@@ -1,0 +1,13 @@
+# Build output
+**/Debug/
+**/Release/
+**/build/
+
+# IDE clutter
+*.launch
+.metadata/
+**/.settings/
+
+# OS junk
+.DS_Store
+Thumbs.db
