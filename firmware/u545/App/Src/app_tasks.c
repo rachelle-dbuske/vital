@@ -55,6 +55,7 @@ static QueueHandle_t sampleQueue;
 /* Diagnostics */
 static volatile uint32_t droppedSamples = 0;   /* REQ-SNS-03 */
 static volatile uint32_t readErrors     = 0;
+static volatile bool periodicLog = true;
 
 /* ---------- Thread-safe logging ---------- */
 void app_log(const char *fmt, ...)
@@ -96,12 +97,14 @@ static void heartbeat_task(void *arg)
     TickType_t lastWake = xTaskGetTickCount();
 
     for (;;) {
-        app_log("[%lu ms] stack free (words): led=%lu hb=%lu smp=%lu proc=%lu\r\n",
-                (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS),
-                (unsigned long)uxTaskGetStackHighWaterMark(ledTaskHandle),
-                (unsigned long)uxTaskGetStackHighWaterMark(NULL),
-                (unsigned long)uxTaskGetStackHighWaterMark(sampleTaskHandle),
-                (unsigned long)uxTaskGetStackHighWaterMark(procTaskHandle));
+        if (periodicLog) {
+            app_log("[%lu ms] stack free (words): led=%lu hb=%lu smp=%lu proc=%lu\r\n",
+                    (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS),
+                    (unsigned long)uxTaskGetStackHighWaterMark(ledTaskHandle),
+                    (unsigned long)uxTaskGetStackHighWaterMark(NULL),
+                    (unsigned long)uxTaskGetStackHighWaterMark(sampleTaskHandle),
+                    (unsigned long)uxTaskGetStackHighWaterMark(procTaskHandle));
+        }
         vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(5000));
     }
 }
@@ -151,7 +154,9 @@ static void processing_task(void *arg)
         }
 
 #if STREAM_RAW
-        app_log(">ir:%lu\n>red:%lu\n", (unsigned long)s.ir, (unsigned long)s.red);
+        if (periodicLog) {
+            app_log(">ir:%lu\n>red:%lu\n", (unsigned long)s.ir, (unsigned long)s.red);
+        }
 #endif
 
         irSum  += s.ir;
@@ -177,11 +182,13 @@ static void processing_task(void *arg)
             }
 
 #if !STREAM_RAW
-            app_log("IR mean=%lu pp=%lu | RED mean=%lu pp=%lu | SpO2~%.1f | drop=%lu err=%lu\r\n",
-                    (unsigned long)irMean, (unsigned long)irPp,
-                    (unsigned long)redMean, (unsigned long)redPp,
-                    spo2Est,
-                    (unsigned long)droppedSamples, (unsigned long)readErrors);
+            if (periodicLog) {
+                app_log("IR mean=%lu pp=%lu | RED mean=%lu pp=%lu | SpO2~%.1f | drop=%lu err=%lu\r\n",
+                        (unsigned long)irMean, (unsigned long)irPp,
+                        (unsigned long)redMean, (unsigned long)redPp,
+                        spo2Est,
+                        (unsigned long)droppedSamples, (unsigned long)readErrors);
+            }
 #else
             (void)spo2Est;
 #endif
@@ -220,4 +227,22 @@ void app_tasks_create(void)
     configASSERT(hbTaskHandle     != NULL);
     configASSERT(sampleTaskHandle != NULL);
     configASSERT(procTaskHandle   != NULL);
+}
+
+void app_set_periodic_log(bool enabled)
+{
+    periodicLog = enabled;
+}
+
+void app_print_stats(void)
+{
+    app_log("uptime: %lu ms\r\n",
+            (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS));
+    app_log("samples dropped: %lu | read errors: %lu\r\n",
+            (unsigned long)droppedSamples, (unsigned long)readErrors);
+    app_log("stack free (words): led=%lu hb=%lu smp=%lu proc=%lu\r\n",
+            (unsigned long)uxTaskGetStackHighWaterMark(ledTaskHandle),
+            (unsigned long)uxTaskGetStackHighWaterMark(hbTaskHandle),
+            (unsigned long)uxTaskGetStackHighWaterMark(sampleTaskHandle),
+            (unsigned long)uxTaskGetStackHighWaterMark(procTaskHandle));
 }

@@ -136,6 +136,7 @@ To be completed as implementation proceeds.
 | REQ-SNS-01 | app_tasks.c: sampling_task | Pending | Implemented (sim) |
 | REQ-SNS-02 | app_tasks.c: sampling_task, sensor.h | Pending | Interface only |
 | REQ-SNS-03 | app_tasks.c: sampling_task (droppedSamples) | Manual: drop=0 over 10 min | Implemented |
+| REQ-COM-05 | cli.c: cli_task, command table | Manual: CLI test session (Step 7) | Implemented |
 
 ## 8. Revision History
 
