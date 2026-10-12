@@ -2,6 +2,8 @@
 #include "main.h"
 #include "usart.h"
 #include "sensor.h"
+#include "watchdog.h"
+#include "fault.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -133,6 +135,8 @@ static void sampling_task(void *arg)
         } else {
             readErrors++;
         }
+        wd_checkin(WD_SAMPLE);
+        vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(SAMPLE_PERIOD_MS));
 
         vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(SAMPLE_PERIOD_MS));
     }
@@ -149,6 +153,7 @@ static void processing_task(void *arg)
     uint32_t redMin = UINT32_MAX, redMax = 0;
 
     for (;;) {
+        wd_checkin(WD_PROCESS);
         if (xQueueReceive(sampleQueue, &s, portMAX_DELAY) != pdPASS) {
             continue;
         }

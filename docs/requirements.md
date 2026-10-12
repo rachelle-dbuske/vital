@@ -137,6 +137,10 @@ To be completed as implementation proceeds.
 | REQ-SNS-02 | app_tasks.c: sampling_task, sensor.h | Pending | Interface only |
 | REQ-SNS-03 | app_tasks.c: sampling_task (droppedSamples) | Manual: drop=0 over 10 min | Implemented |
 | REQ-COM-05 | cli.c: cli_task, command table | Manual: CLI test session (Step 7) | Implemented |
+| REQ-FLT-01 | watchdog.c: supervisor_task; fault.c: safe_state_enter | Manual: fault hang cli/sample (Step 11) | Implemented; latency measurement pending |
+| REQ-FLT-03 | app_tasks.c: vApplicationStackOverflowHook → safe_state_enter | Manual: undersized stack | Implemented |
+| REQ-FLT-04 | fault.c: fault_boot_check, fault_report_last | Manual: boot report after each fault test | Implemented |
+| REQ-FLT-05 | watchdog.c: HAL_IWDG_Refresh; IWDG ~1 s | Manual: fault hang supervisor | Implemented |
 
 ## 8. Revision History
 

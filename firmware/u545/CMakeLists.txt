@@ -47,6 +47,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     App/Src/app_tasks.c
     App/Src/cli.c
+    App/Src/fault.c
+    App/Src/watchdog.c
 )
 
 # Add include paths
@@ -74,8 +76,13 @@ target_link_options(${CMAKE_PROJECT_NAME} PRIVATE -u _printf_float)
 
 # Sensor selection: simulated (default until hardware arrives) or real MAX30102
 option(VITAL_USE_SIM_SENSOR "Use simulated sensor instead of MAX30102" ON)
-
 if(VITAL_USE_SIM_SENSOR)
     target_sources(${CMAKE_PROJECT_NAME} PRIVATE App/Src/sensor_sim.c)
     target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE VITAL_USE_SIM_SENSOR=1)
+endif()
+
+# Fault injection commands (turn OFF for a "production" build)
+option(VITAL_FAULT_INJECTION "Enable fault injection CLI commands" ON)
+if(VITAL_FAULT_INJECTION)
+    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE VITAL_FAULT_INJECTION=1)
 endif()

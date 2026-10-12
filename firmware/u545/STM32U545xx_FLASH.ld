@@ -190,6 +190,15 @@ SECTIONS
     __bss_end__ = _ebss;
       PROVIDE( __bss_end = .);
   } >RAM
+  /* Survives reset (but not power loss): used for the fault record */
+  .noinit (NOLOAD) :
+  {
+    . = ALIGN(4);
+    *(.noinit)
+    *(.noinit*)
+    . = ALIGN(4);
+  } >RAM
+
   PROVIDE( __non_tls_bss_start = ADDR(.bss) );
 
   PROVIDE( __bss_start = __tbss_start );

@@ -2,6 +2,7 @@
 #include "app_tasks.h"
 #include "main.h"
 #include "usart.h"
+#include "watchdog.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -9,6 +10,9 @@
 
 #if VITAL_USE_SIM_SENSOR
 #include "sensor_sim.h"
+#endif
+#if VITAL_FAULT_INJECTION
+static void cmd_fault(int argc, char *argv[]);
 #endif
 
 #include <stdbool.h>
@@ -119,6 +123,9 @@ static const cli_command_t commands[] = {
 #if VITAL_USE_SIM_SENSOR
     { "sim",   "sim hr <30-240> | spo2 <70-100> | finger <on|off>", cmd_sim   },
 #endif
+#if VITAL_FAULT_INJECTION
+    { "fault", "fault hang <sample|process|cli|supervisor>", cmd_fault },
+#endif
 };
 
 #define NUM_COMMANDS (sizeof(commands) / sizeof(commands[0]))
@@ -195,6 +202,21 @@ static void cmd_sim(int argc, char *argv[])
 }
 #endif
 
+#if VITAL_FAULT_INJECTION
+static void cmd_fault(int argc, char *argv[])
+{
+    if ((argc == 3) && (strcmp(argv[1], "hang") == 0)) {
+        if (wd_inject_hang(argv[2])) {
+            app_log("injecting hang in '%s'\r\n", argv[2]);
+        } else {
+            app_log("error: unknown task '%s'\r\n", argv[2]);
+        }
+    } else {
+        app_log("usage: fault hang <sample|process|cli|supervisor>\r\n");
+    }
+}
+#endif
+
 static void execute(char *line)
 {
     char *argv[CLI_MAX_ARGS];
@@ -225,6 +247,7 @@ static void cli_task(void *arg)
     app_log("\r\nVital CLI ready. Type 'help'.\r\n> ");
 
     for (;;) {
+        wd_checkin(WD_CLI);
         if (xStreamBufferReceive(rxStream, &ch, 1U, portMAX_DELAY) != 1U) {
             continue;
         }
