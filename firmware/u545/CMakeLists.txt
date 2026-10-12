@@ -65,7 +65,16 @@ list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
 # Add linked libraries
 target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
+    m
     # Add user defined libraries
 )
 # Enable float support in printf (newlib-nano)
 target_link_options(${CMAKE_PROJECT_NAME} PRIVATE -u _printf_float)
+
+# Sensor selection: simulated (default until hardware arrives) or real MAX30102
+option(VITAL_USE_SIM_SENSOR "Use simulated sensor instead of MAX30102" ON)
+
+if(VITAL_USE_SIM_SENSOR)
+    target_sources(${CMAKE_PROJECT_NAME} PRIVATE App/Src/sensor_sim.c)
+    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE VITAL_USE_SIM_SENSOR=1)
+endif()

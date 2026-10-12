@@ -133,7 +133,9 @@ To be completed as implementation proceeds.
 
 | Requirement | Implementation | Test | Status |
 |---|---|---|---|
-| REQ-SNS-01 | | | Not started |
+| REQ-SNS-01 | app_tasks.c: sampling_task | Pending | Implemented (sim) |
+| REQ-SNS-02 | app_tasks.c: sampling_task, sensor.h | Pending | Interface only |
+| REQ-SNS-03 | app_tasks.c: sampling_task (droppedSamples) | Manual: drop=0 over 10 min | Implemented |
 
 ## 8. Revision History
 
