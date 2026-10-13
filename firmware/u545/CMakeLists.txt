@@ -49,6 +49,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/Src/cli.c
     App/Src/fault.c
     App/Src/watchdog.c
+    App/Src/ppg.c
+    App/Src/ppg_model.c
 )
 
 # Add include paths

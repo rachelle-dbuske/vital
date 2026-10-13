@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit-tests:
+    name: Unit tests (host)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build gcovr
+
+      - name: Configure
+        run: cmake -S firmware/u545/test -B build-test -G Ninja -DVITAL_COVERAGE=ON
+
+      - name: Build
+        run: cmake --build build-test
+
+      - name: Run tests
+        run: ctest --test-dir build-test --output-on-failure
+
+      - name: Coverage report
+        run: |
+          gcovr -r firmware/u545 --filter firmware/u545/App/ build-test
+          gcovr -r firmware/u545 --filter firmware/u545/App/ build-test --html-details -o coverage.html
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage*.html
+
+  firmware:
+    name: Firmware build (STM32U545)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ARM GCC
+        uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: '13.3.Rel1'
+
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Configure
+        working-directory: firmware/u545
+        run: cmake --preset Debug
+
+      - name: Build
+        working-directory: firmware/u545
+        run: cmake --build --preset Debug
+
+      - name: Size report
+        working-directory: firmware/u545
+        run: arm-none-eabi-size build/Debug/u545.elf

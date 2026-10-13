@@ -37,6 +37,10 @@ static StreamBufferHandle_t rxStream;
 
 static uint8_t           rxByte;            /* HAL receives into this, one byte at a time */
 static volatile uint32_t rxOverflows = 0;   /* bytes lost because the buffer was full */
+static volatile uint32_t rxErrors      = 0; /* UART errors (overrun, framing, noise) */
+static volatile uint32_t lastRxErrCode = 0; /* HAL error code of the most recent error */
+static volatile uint32_t rxRearmFails = 0;
+static volatile uint32_t rxRestarts   = 0;
 
 /* ---------- UART receive: interrupt context ---------- */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
@@ -47,7 +51,9 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         if (xStreamBufferSendFromISR(rxStream, &rxByte, 1U, &woken) != 1U) {
             rxOverflows++;
         }
-        (void)HAL_UART_Receive_IT(&huart1, &rxByte, 1U);   /* re-arm for the next byte */
+        if (HAL_UART_Receive_IT(&huart1, &rxByte, 1U) != HAL_OK) {
+            rxRearmFails++;     /* the CLI task will restart reception */
+        }
         portYIELD_FROM_ISR(woken);
     }
 }
@@ -121,7 +127,7 @@ static const cli_command_t commands[] = {
     { "stats", "stats                  show task and data stats",    cmd_stats },
     { "log",   "log <on|off>           periodic output on/off",      cmd_log   },
 #if VITAL_USE_SIM_SENSOR
-    { "sim",   "sim hr <30-240> | spo2 <70-100> | finger <on|off>", cmd_sim   },
+    { "sim",   "sim hr|spo2|finger|perf|noise <value>  set simulator input", cmd_sim },
 #endif
 #if VITAL_FAULT_INJECTION
     { "fault", "fault hang <sample|process|cli|supervisor>", cmd_fault },
@@ -144,9 +150,11 @@ static void cmd_stats(int argc, char *argv[])
     (void)argc;
     (void)argv;
     app_print_stats();
-    app_log("cli: stack free=%lu words | rx overflows=%lu\r\n",
-            (unsigned long)uxTaskGetStackHighWaterMark(NULL),
+    app_log("rx errors=%lu (last 0x%lx) rearm fails=%lu restarts=%lu overflows=%lu\r\n",
+            (unsigned long)rxErrors, (unsigned long)lastRxErrCode,
+            (unsigned long)rxRearmFails, (unsigned long)rxRestarts,
             (unsigned long)rxOverflows);
+    app_log("CPU clock: %lu Hz\r\n", (unsigned long)SystemCoreClock);
 }
 
 static void cmd_log(int argc, char *argv[])
@@ -168,7 +176,7 @@ static void cmd_sim(int argc, char *argv[])
     float value;
 
     if (argc != 3) {
-        app_log("usage: sim hr <30-240> | spo2 <70-100> | finger <on|off>\r\n");
+        app_log("usage: sim hr <30-240> | spo2 <0-100> | finger <on|off> | perf <0-5> | noise <0-500>\r\n");
         return;
     }
 
@@ -180,11 +188,11 @@ static void cmd_sim(int argc, char *argv[])
             app_log("error: HR must be a number from 30 to 240\r\n");
         }
     } else if (strcmp(argv[1], "spo2") == 0) {
-        if (parse_float(argv[2], 70.0f, 100.0f, &value)) {
+        if (parse_float(argv[2], 0.0f, 100.0f, &value)) {
             sensor_sim_set_spo2(value);
             app_log("sim: SpO2 = %.1f%%\r\n", value);
         } else {
-            app_log("error: SpO2 must be a number from 70 to 100\r\n");
+            app_log("error: SpO2 must be a number from 0 to 100\r\n");
         }
     } else if (strcmp(argv[1], "finger") == 0) {
         if (strcmp(argv[2], "on") == 0) {
@@ -195,6 +203,20 @@ static void cmd_sim(int argc, char *argv[])
             app_log("sim: finger removed\r\n");
         } else {
             app_log("error: use 'on' or 'off'\r\n");
+        }
+    } else if (strcmp(argv[1], "perf") == 0) {
+        if (parse_float(argv[2], 0.0f, 5.0f, &value)) {
+            sensor_sim_set_perfusion(value / 100.0f);
+            app_log("sim: perfusion = %.2f%%\r\n", value);
+        } else {
+            app_log("error: perfusion must be 0 to 5 (percent)\r\n");
+        }
+    } else if (strcmp(argv[1], "noise") == 0) {
+        if (parse_float(argv[2], 0.0f, 500.0f, &value)) {
+            sensor_sim_set_noise(value);
+            app_log("sim: noise = %.0f counts\r\n", value);
+        } else {
+            app_log("error: noise must be 0 to 500\r\n");
         }
     } else {
         app_log("error: unknown sim setting '%s'\r\n", argv[1]);
@@ -248,8 +270,15 @@ static void cli_task(void *arg)
 
     for (;;) {
         wd_checkin(WD_CLI);
-        if (xStreamBufferReceive(rxStream, &ch, 1U, portMAX_DELAY) != 1U) {
-            continue;
+        
+        /* Self-heal: if reception has stopped, restart it. */
+        if (huart1.RxState == HAL_UART_STATE_READY) {
+            if (HAL_UART_Receive_IT(&huart1, &rxByte, 1U) == HAL_OK) {
+                rxRestarts++;
+            }
+        }
+        if (xStreamBufferReceive(rxStream, &ch, 1U, pdMS_TO_TICKS(100)) != 1U) {
+            continue;   /* no key in 100 ms: loop around and check in again */
         }
 
         if ((ch == '\r') || (ch == '\n')) {

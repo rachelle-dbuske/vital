@@ -4,6 +4,7 @@
 #include "sensor.h"
 #include "watchdog.h"
 #include "fault.h"
+#include "ppg.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -58,6 +59,9 @@ static QueueHandle_t sampleQueue;
 static volatile uint32_t droppedSamples = 0;   /* REQ-SNS-03 */
 static volatile uint32_t readErrors     = 0;
 static volatile bool periodicLog = true;
+
+static ppg_t        ppg;            /* static: too large for the task stack */
+static ppg_result_t latestResult;   /* shared with other tasks */
 
 /* ---------- Thread-safe logging ---------- */
 void app_log(const char *fmt, ...)
@@ -142,19 +146,18 @@ static void sampling_task(void *arg)
     }
 }
 
+/* Implements: REQ-PRC-03 (1 s update) */
 static void processing_task(void *arg)
 {
     (void)arg;
     sensor_sample_t s;
+    uint32_t sinceReport = 0U;
 
-    uint32_t n = 0;
-    uint64_t irSum = 0, redSum = 0;
-    uint32_t irMin = UINT32_MAX, irMax = 0;
-    uint32_t redMin = UINT32_MAX, redMax = 0;
+    ppg_init(&ppg, 1000U / SAMPLE_PERIOD_MS);
 
     for (;;) {
         wd_checkin(WD_PROCESS);
-        if (xQueueReceive(sampleQueue, &s, portMAX_DELAY) != pdPASS) {
+        if (xQueueReceive(sampleQueue, &s, pdMS_TO_TICKS(100)) != pdPASS) {
             continue;
         }
 
@@ -164,44 +167,31 @@ static void processing_task(void *arg)
         }
 #endif
 
-        irSum  += s.ir;
-        redSum += s.red;
-        if (s.ir  < irMin)  { irMin  = s.ir;  }
-        if (s.ir  > irMax)  { irMax  = s.ir;  }
-        if (s.red < redMin) { redMin = s.red; }
-        if (s.red > redMax) { redMax = s.red; }
-        n++;
+        (void)ppg_process(&ppg, s.red, s.ir);
 
-        if (n >= STATS_WINDOW_SAMPLES) {
-            const uint32_t irMean  = (uint32_t)(irSum / n);
-            const uint32_t redMean = (uint32_t)(redSum / n);
-            const uint32_t irPp    = irMax - irMin;
-            const uint32_t redPp   = redMax - redMin;
+        sinceReport++;
+        if (sinceReport >= STATS_WINDOW_SAMPLES) {   /* once per second */
+            sinceReport = 0U;
+            const ppg_result_t *r = ppg_result(&ppg);
 
-            /* Rough preview of the SpO2 calculation (Step 6 will do this properly). */
-            float spo2Est = 0.0f;
-            if ((irPp > 0U) && (irMean > 0U) && (redMean > 0U)) {
-                const float r = ((float)redPp / (float)redMean) /
-                                ((float)irPp  / (float)irMean);
-                spo2Est = 110.0f - (25.0f * r);
-            }
+            taskENTER_CRITICAL();
+            latestResult = *r;
+            taskEXIT_CRITICAL();
 
 #if !STREAM_RAW
             if (periodicLog) {
-                app_log("IR mean=%lu pp=%lu | RED mean=%lu pp=%lu | SpO2~%.1f | drop=%lu err=%lu\r\n",
-                        (unsigned long)irMean, (unsigned long)irPp,
-                        (unsigned long)redMean, (unsigned long)redPp,
-                        spo2Est,
-                        (unsigned long)droppedSamples, (unsigned long)readErrors);
+                if (!r->finger_present) {
+                    app_log("no finger | drop=%lu\r\n", (unsigned long)droppedSamples);
+                } else if (!r->valid) {
+                    app_log("acquiring... perf=%.2f%% | drop=%lu\r\n",
+                            r->perfusion * 100.0f, (unsigned long)droppedSamples);
+                } else {
+                    app_log("HR %.0f BPM | SpO2 %.1f%% | perf %.2f%% | drop=%lu\r\n",
+                            r->hr_bpm, r->spo2, r->perfusion * 100.0f,
+                            (unsigned long)droppedSamples);
+                }
             }
-#else
-            (void)spo2Est;
 #endif
-
-            n = 0;
-            irSum = 0;  redSum = 0;
-            irMin = UINT32_MAX;  irMax = 0;
-            redMin = UINT32_MAX; redMax = 0;
         }
     }
 }
@@ -250,4 +240,11 @@ void app_print_stats(void)
             (unsigned long)uxTaskGetStackHighWaterMark(hbTaskHandle),
             (unsigned long)uxTaskGetStackHighWaterMark(sampleTaskHandle),
             (unsigned long)uxTaskGetStackHighWaterMark(procTaskHandle));
+}
+
+void app_get_vitals(ppg_result_t *out)
+{
+    taskENTER_CRITICAL();
+    *out = latestResult;
+    taskEXIT_CRITICAL();
 }
