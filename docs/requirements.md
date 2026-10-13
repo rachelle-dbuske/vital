@@ -141,6 +141,11 @@ To be completed as implementation proceeds.
 | REQ-FLT-03 | app_tasks.c: vApplicationStackOverflowHook → safe_state_enter | Manual: undersized stack | Implemented |
 | REQ-FLT-04 | fault.c: fault_boot_check, fault_report_last | Manual: boot report after each fault test | Implemented |
 | REQ-FLT-05 | watchdog.c: HAL_IWDG_Refresh; IWDG ~1 s | Manual: fault hang supervisor | Implemented |
+| REQ-PRC-01 | ppg.c | test_ppg.c: test_REQ_PRC_01_* (6 tests) | Verified (sim) |
+| REQ-PRC-02 | ppg.c | test_ppg.c: test_REQ_PRC_02_* (7 tests) | Verified (sim) |
+| REQ-PRC-03 | app_tasks.c: processing_task | test_REQ_PRC_03_valid_within_8_seconds; 1 s report | Implemented |
+| REQ-PRC-04 | ppg.c: validity checks | test_REQ_PRC_04_* (2 tests) | Verified (sim) |
+| REQ-FLT-02 | ppg.c: finger detection | test_REQ_FLT_02_* (2 tests) | Detection verified; alarm pending |
 
 ## 8. Revision History
 
