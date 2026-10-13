@@ -13,7 +13,7 @@
 #define WD_WINDOW_MS            250U   /* worst-case detection = 2 windows = 500 ms */
 #define WD_ALL_BITS             ((EventBits_t)((1UL << WD_COUNT) - 1UL))
 #define SUPERVISOR_STACK_WORDS  256U
-#define SUPERVISOR_PRIORITY     (tskIDLE_PRIORITY + 5)   /* highest application task */
+#define SUPERVISOR_PRIORITY     (tskIDLE_PRIORITY + 6)   /* highest application task */
 
 static StaticEventGroup_t checkinGroupBuf;
 static EventGroupHandle_t checkinGroup;
@@ -21,7 +21,7 @@ static EventGroupHandle_t checkinGroup;
 static StaticTask_t supTcb;
 static StackType_t  supStack[SUPERVISOR_STACK_WORDS];
 
-static const char *const taskNames[WD_COUNT] = { "sample", "process", "cli" };
+static const char *const taskNames[WD_COUNT] = { "sample", "process", "cli", "alarm" };
 
 #if VITAL_FAULT_INJECTION
 static volatile uint32_t injectHangMask = 0U;   /* bit WD_COUNT = supervisor */

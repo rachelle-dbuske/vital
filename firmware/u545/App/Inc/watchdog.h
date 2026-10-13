@@ -7,6 +7,7 @@ typedef enum {
     WD_SAMPLE = 0,
     WD_PROCESS,
     WD_CLI,
+    WD_ALARM,
     WD_COUNT
 } wd_task_id_t;
 

@@ -146,6 +146,13 @@ To be completed as implementation proceeds.
 | REQ-PRC-03 | app_tasks.c: processing_task | test_REQ_PRC_03_valid_within_8_seconds; 1 s report | Implemented |
 | REQ-PRC-04 | ppg.c: validity checks | test_REQ_PRC_04_* (2 tests) | Verified (sim) |
 | REQ-FLT-02 | ppg.c: finger detection | test_REQ_FLT_02_* (2 tests) | Detection verified; alarm pending |
+| REQ-ALM-01 | alarm.c, alarm_task.c | test_alarm.c: test_REQ_ALM_01_* (4) + end-to-end; latency log | Verified (sim); analyzer measurement pending |
+| REQ-ALM-02 | alarm.c | test_REQ_ALM_02_* (3) | Verified (sim) |
+| REQ-ALM-03 | alarm.c: blink patterns | test_REQ_ALM_03_* (3) | Verified |
+| REQ-ALM-04 | alarm.c, EXTI13 → alarm_task | test_REQ_ALM_04_* (4); manual: B1 | Verified |
+| REQ-ALM-05 | alarm.c: alarm_set_limits; cli.c: alarm | test_REQ_ALM_05_* (2) | Verified |
+| REQ-UI-02  | alarm_task.c: startup self-test | Manual: observe at boot | Implemented |
+| REQ-FLT-02 | ppg.c + immediate publish + alarm.c | test_REQ_FLT_02_* (4) | Verified (sim) |
 
 ## 8. Revision History
 

@@ -51,6 +51,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/Src/watchdog.c
     App/Src/ppg.c
     App/Src/ppg_model.c
+    App/Src/alarm.c
+    App/Src/alarm_task.c
 )
 
 # Add include paths

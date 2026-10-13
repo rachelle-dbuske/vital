@@ -5,6 +5,7 @@
 #include "watchdog.h"
 #include "fault.h"
 #include "ppg.h"
+#include "alarm_task.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -21,21 +22,15 @@
 #define STATS_WINDOW_SAMPLES     100U    /* 1 s of samples */
 #define STREAM_RAW                 0     /* 1 = stream samples for plotting */
 
-#define LED_TASK_STACK_WORDS     128U
 #define HB_TASK_STACK_WORDS      512U
 #define SAMPLE_TASK_STACK_WORDS  256U
 #define PROC_TASK_STACK_WORDS    512U
 
-#define LED_TASK_PRIORITY        (tskIDLE_PRIORITY + 1)
 #define HB_TASK_PRIORITY         (tskIDLE_PRIORITY + 2)
 #define PROC_TASK_PRIORITY       (tskIDLE_PRIORITY + 3)
 #define SAMPLE_TASK_PRIORITY     (tskIDLE_PRIORITY + 4)
 
 /* ---------- Static storage (no heap) ---------- */
-static StaticTask_t  ledTaskTcb;
-static StackType_t   ledTaskStack[LED_TASK_STACK_WORDS];
-static TaskHandle_t  ledTaskHandle;
-
 static StaticTask_t  hbTaskTcb;
 static StackType_t   hbTaskStack[HB_TASK_STACK_WORDS];
 static TaskHandle_t  hbTaskHandle;
@@ -63,6 +58,8 @@ static volatile bool periodicLog = true;
 static ppg_t        ppg;            /* static: too large for the task stack */
 static ppg_result_t latestResult;   /* shared with other tasks */
 
+static uint32_t latestPublishedMs;
+
 /* ---------- Thread-safe logging ---------- */
 void app_log(const char *fmt, ...)
 {
@@ -86,17 +83,6 @@ void app_log(const char *fmt, ...)
 }
 
 /* ---------- Tasks ---------- */
-static void led_task(void *arg)
-{
-    (void)arg;
-    TickType_t lastWake = xTaskGetTickCount();
-
-    for (;;) {
-        HAL_GPIO_TogglePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin);
-        vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(500));
-    }
-}
-
 static void heartbeat_task(void *arg)
 {
     (void)arg;
@@ -104,9 +90,8 @@ static void heartbeat_task(void *arg)
 
     for (;;) {
         if (periodicLog) {
-            app_log("[%lu ms] stack free (words): led=%lu hb=%lu smp=%lu proc=%lu\r\n",
+            app_log("[%lu ms] stack free (words): hb=%lu smp=%lu proc=%lu\r\n",
                     (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS),
-                    (unsigned long)uxTaskGetStackHighWaterMark(ledTaskHandle),
                     (unsigned long)uxTaskGetStackHighWaterMark(NULL),
                     (unsigned long)uxTaskGetStackHighWaterMark(sampleTaskHandle),
                     (unsigned long)uxTaskGetStackHighWaterMark(procTaskHandle));
@@ -166,17 +151,29 @@ static void processing_task(void *arg)
             app_log(">ir:%lu\n>red:%lu\n", (unsigned long)s.ir, (unsigned long)s.red);
         }
 #endif
-
         (void)ppg_process(&ppg, s.red, s.ir);
+        const ppg_result_t *r = ppg_result(&ppg);
 
         sinceReport++;
-        if (sinceReport >= STATS_WINDOW_SAMPLES) {   /* once per second */
-            sinceReport = 0U;
-            const ppg_result_t *r = ppg_result(&ppg);
+        const bool periodic = (sinceReport >= STATS_WINDOW_SAMPLES);
+        const bool changed  = (r->finger_present != latestResult.finger_present) ||
+                              (r->valid != latestResult.valid);
+
+        /* Publish once per second (REQ-PRC-03), and immediately when the
+         * finger or validity state changes (REQ-FLT-02: 1 s detection). */
+        if (periodic || changed) {
+            HAL_GPIO_WritePin(TP_VITALS_GPIO_Port, TP_VITALS_Pin, GPIO_PIN_SET);
 
             taskENTER_CRITICAL();
-            latestResult = *r;
+            latestResult      = *r;
+            latestPublishedMs = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
             taskEXIT_CRITICAL();
+
+            alarm_task_notify_vitals();
+        }
+
+        if (periodic) {
+            sinceReport = 0U;
 
 #if !STREAM_RAW
             if (periodicLog) {
@@ -206,9 +203,6 @@ void app_tasks_create(void)
                                      sampleQueueStorage, &sampleQueueBuf);
     configASSERT(sampleQueue != NULL);
 
-    ledTaskHandle = xTaskCreateStatic(led_task, "led", LED_TASK_STACK_WORDS, NULL,
-                                      LED_TASK_PRIORITY, ledTaskStack, &ledTaskTcb);
-
     hbTaskHandle = xTaskCreateStatic(heartbeat_task, "heartbeat", HB_TASK_STACK_WORDS, NULL,
                                      HB_TASK_PRIORITY, hbTaskStack, &hbTaskTcb);
 
@@ -218,7 +212,6 @@ void app_tasks_create(void)
     procTaskHandle = xTaskCreateStatic(processing_task, "process", PROC_TASK_STACK_WORDS, NULL,
                                        PROC_TASK_PRIORITY, procTaskStack, &procTaskTcb);
 
-    configASSERT(ledTaskHandle    != NULL);
     configASSERT(hbTaskHandle     != NULL);
     configASSERT(sampleTaskHandle != NULL);
     configASSERT(procTaskHandle   != NULL);
@@ -235,16 +228,16 @@ void app_print_stats(void)
             (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS));
     app_log("samples dropped: %lu | read errors: %lu\r\n",
             (unsigned long)droppedSamples, (unsigned long)readErrors);
-    app_log("stack free (words): led=%lu hb=%lu smp=%lu proc=%lu\r\n",
-            (unsigned long)uxTaskGetStackHighWaterMark(ledTaskHandle),
+    app_log("stack free (words): hb=%lu smp=%lu proc=%lu\r\n",
             (unsigned long)uxTaskGetStackHighWaterMark(hbTaskHandle),
             (unsigned long)uxTaskGetStackHighWaterMark(sampleTaskHandle),
             (unsigned long)uxTaskGetStackHighWaterMark(procTaskHandle));
 }
 
-void app_get_vitals(ppg_result_t *out)
+void app_get_vitals(ppg_result_t *out, uint32_t *published_ms)
 {
     taskENTER_CRITICAL();
-    *out = latestResult;
+    *out          = latestResult;
+    *published_ms = latestPublishedMs;
     taskEXIT_CRITICAL();
 }

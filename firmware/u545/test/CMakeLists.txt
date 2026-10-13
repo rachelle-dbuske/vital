@@ -20,19 +20,30 @@ set(APP_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../App)
 
 option(VITAL_COVERAGE "Build tests with gcov coverage" OFF)
 
-add_executable(test_ppg
+enable_testing()
+
+# Helper: one test executable per module
+function(vital_add_test name)
+    add_executable(${name} ${ARGN})
+    target_include_directories(${name} PRIVATE ${APP_DIR}/Inc)
+    target_compile_options(${name} PRIVATE -Wall -Wextra -Werror)
+    target_link_libraries(${name} PRIVATE unity m)
+    if(VITAL_COVERAGE)
+        target_compile_options(${name} PRIVATE --coverage -O0)
+        target_link_options(${name} PRIVATE --coverage)
+    endif()
+    add_test(NAME ${name} COMMAND ${name})
+endfunction()
+
+vital_add_test(test_ppg
     test_ppg.c
     ${APP_DIR}/Src/ppg.c
     ${APP_DIR}/Src/ppg_model.c
 )
-target_include_directories(test_ppg PRIVATE ${APP_DIR}/Inc)
-target_compile_options(test_ppg PRIVATE -Wall -Wextra -Werror)
-target_link_libraries(test_ppg PRIVATE unity m)
 
-if(VITAL_COVERAGE)
-    target_compile_options(test_ppg PRIVATE --coverage -O0)
-    target_link_options(test_ppg PRIVATE --coverage)
-endif()
-
-enable_testing()
-add_test(NAME test_ppg COMMAND test_ppg)
+vital_add_test(test_alarm
+    test_alarm.c
+    ${APP_DIR}/Src/alarm.c
+    ${APP_DIR}/Src/ppg.c
+    ${APP_DIR}/Src/ppg_model.c
+)

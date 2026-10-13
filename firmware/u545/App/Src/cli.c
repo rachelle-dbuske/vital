@@ -3,6 +3,7 @@
 #include "main.h"
 #include "usart.h"
 #include "watchdog.h"
+#include "alarm_task.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -41,6 +42,8 @@ static volatile uint32_t rxErrors      = 0; /* UART errors (overrun, framing, no
 static volatile uint32_t lastRxErrCode = 0; /* HAL error code of the most recent error */
 static volatile uint32_t rxRearmFails = 0;
 static volatile uint32_t rxRestarts   = 0;
+
+static void cmd_alarm(int argc, char *argv[]);
 
 /* ---------- UART receive: interrupt context ---------- */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
@@ -126,11 +129,12 @@ static const cli_command_t commands[] = {
     { "help",  "help                   list commands",               cmd_help  },
     { "stats", "stats                  show task and data stats",    cmd_stats },
     { "log",   "log <on|off>           periodic output on/off",      cmd_log   },
+    { "alarm", "alarm | alarm spo2 <pct> | alarm hr <low> <high> | alarm pause", cmd_alarm },
 #if VITAL_USE_SIM_SENSOR
     { "sim",   "sim hr|spo2|finger|perf|noise <value>  set simulator input", cmd_sim },
 #endif
 #if VITAL_FAULT_INJECTION
-    { "fault", "fault hang <sample|process|cli|supervisor>", cmd_fault },
+    { "fault", "fault hang <sample|process|cli|alarm|supervisor>", cmd_fault },
 #endif
 };
 
@@ -167,6 +171,49 @@ static void cmd_log(int argc, char *argv[])
         app_log("periodic log off\r\n");
     } else {
         app_log("usage: log <on|off>\r\n");
+    }
+}
+
+static void cmd_alarm(int argc, char *argv[])
+{
+    alarm_limits_t l;
+    float a, b;
+    alarm_task_get_limits(&l);
+
+    if (argc == 1) {
+        alarm_output_t o;
+        alarm_task_get_output(&o);
+        app_log("limits: SpO2 < %.0f%% | HR < %.0f or > %.0f BPM\r\n",
+                l.spo2_low, l.hr_low, l.hr_high);
+        app_log("state: conditions=0x%02lx phys=%d tech=%d audible=%d paused=%d\r\n",
+                (unsigned long)o.conditions, o.physiological, o.technical,
+                o.audible, o.audio_paused);
+        return;
+    }
+
+    if ((argc == 2) && (strcmp(argv[1], "pause") == 0)) {
+        alarm_task_request_pause();
+        app_log("pause requested\r\n");
+        return;
+    }
+
+    if ((argc == 3) && (strcmp(argv[1], "spo2") == 0) &&
+        parse_float(argv[2], 0.0f, 100.0f, &a)) {
+        l.spo2_low = a;
+    } else if ((argc == 4) && (strcmp(argv[1], "hr") == 0) &&
+               parse_float(argv[2], 0.0f, 300.0f, &a) &&
+               parse_float(argv[3], 0.0f, 300.0f, &b)) {
+        l.hr_low  = a;
+        l.hr_high = b;
+    } else {
+        app_log("usage: alarm | alarm spo2 <50-99> | alarm hr <low> <high> | alarm pause\r\n");
+        return;
+    }
+
+    if (alarm_task_set_limits(&l)) {
+        app_log("limits updated\r\n");
+    } else {
+        app_log("error: rejected (SpO2 50-99, HR 25-250, high - low >= 10)\r\n");
     }
 }
 

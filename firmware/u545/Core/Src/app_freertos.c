@@ -26,6 +26,7 @@
 #include "cli.h"
 #include "watchdog.h"
 #include "fault.h"
+#include "alarm_task.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -108,6 +109,7 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
   wd_create();
+  alarm_task_create();
   app_tasks_create();
   cli_create();
   /* USER CODE END RTOS_THREADS */
