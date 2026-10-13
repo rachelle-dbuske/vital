@@ -12,7 +12,9 @@ The full pipeline (sampling, signal processing, alarms, and fault handling) runs
 
 ## Demo
 
-<!-- Replace with your video or GIF. GitHub plays .mp4 files dragged into the README editor. -->
+
+https://github.com/user-attachments/assets/2d32a519-a399-49e9-9b1a-a44a48677e25
+
 **[Demo video: 90 seconds]**
 
 1. Normal readings: `HR 72 BPM | SpO2 97.8%`
