@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "app_freertos.h"
+#include "i2c.h"
 #include "icache.h"
 #include "iwdg.h"
 #include "usart.h"
@@ -110,6 +111,7 @@ int main(void)
   MX_ICACHE_Init();
   MX_USART1_UART_Init();
   MX_IWDG_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */

@@ -1,6 +1,7 @@
 #include "cli.h"
 #include "app_tasks.h"
 #include "main.h"
+#include "i2c.h"
 #include "usart.h"
 #include "watchdog.h"
 #include "alarm_task.h"
@@ -121,6 +122,7 @@ typedef struct {
 static void cmd_help(int argc, char *argv[]);
 static void cmd_stats(int argc, char *argv[]);
 static void cmd_log(int argc, char *argv[]);
+static void cmd_i2cid(int argc, char *argv[]);
 #if VITAL_USE_SIM_SENSOR
 static void cmd_sim(int argc, char *argv[]);
 #endif
@@ -130,8 +132,9 @@ static const cli_command_t commands[] = {
     { "stats", "stats                  show task and data stats",    cmd_stats },
     { "log",   "log <on|off>           periodic output on/off",      cmd_log   },
     { "alarm", "alarm | alarm spo2 <pct> | alarm hr <low> <high> | alarm pause", cmd_alarm },
+    { "i2cid", "i2cid                  probe MAX30102, read PART_ID (expect 0x15)", cmd_i2cid },
 #if VITAL_USE_SIM_SENSOR
-    { "sim",   "sim hr|spo2|finger|perf|noise <value>  set simulator input", cmd_sim },
+    { "sim",  "sim hr|spo2|finger|perf|noise <value>  set simulator input", cmd_sim },
 #endif
 #if VITAL_FAULT_INJECTION
     { "fault", "fault hang <sample|process|cli|alarm|supervisor>", cmd_fault },
@@ -172,6 +175,44 @@ static void cmd_log(int argc, char *argv[])
     } else {
         app_log("usage: log <on|off>\r\n");
     }
+}
+
+/* Temporary bring-up check; replaced by sensor_init() in max30102.c (REQ-SNS-02). */
+static void cmd_i2cid(int argc, char *argv[])
+{
+    (void)argc;
+    (void)argv;
+    const uint16_t addr = 0x57U << 1;   /* HAL takes the 7-bit address shifted left */
+    uint8_t id = 0U;
+
+    const HAL_StatusTypeDef ready = HAL_I2C_IsDeviceReady(&hi2c1, addr, 3U, 10U);
+    const HAL_StatusTypeDef rd = HAL_I2C_Mem_Read(&hi2c1, addr, 0xFFU, I2C_MEMADD_SIZE_8BIT,
+                                                  &id, 1U, 10U);
+    app_log("MAX30102 ready=%d read=%d part_id=0x%02X (expect 0 0 0x15)\r\n",
+            (int)ready, (int)rd, id);
+    app_log("i2c_err=0x%lx (0x4=no ACK, 0x1=bus err, 0x20=timeout)\r\n",
+            (unsigned long)HAL_I2C_GetError(&hi2c1));
+
+    /* Idle bus lines should read 1 (pulled up); 0 means missing pull-up or a short. */
+    app_log("idle levels: SCL(PB6)=%d SDA(PB7)=%d (expect 1 1)\r\n",
+            (int)HAL_GPIO_ReadPin(SENSOR_SCL_GPIO_Port, SENSOR_SCL_Pin),
+            (int)HAL_GPIO_ReadPin(SENSOR_SDA_GPIO_Port, SENSOR_SDA_Pin));
+
+    /* Scan all 7-bit addresses; stop on anything worse than a NACK so a stuck bus
+     * cannot keep this task away from its watchdog check-in for too long. */
+    app_log("scan:");
+    uint32_t found = 0U;
+    for (uint16_t a = 0x08U; a <= 0x77U; a++) {
+        if (HAL_I2C_IsDeviceReady(&hi2c1, (uint16_t)(a << 1), 1U, 2U) == HAL_OK) {
+            app_log(" 0x%02X", a);
+            found++;
+        } else if (HAL_I2C_GetError(&hi2c1) != HAL_I2C_ERROR_AF) {
+            app_log(" aborted at 0x%02X (err 0x%lx)", a,
+                    (unsigned long)HAL_I2C_GetError(&hi2c1));
+            break;
+        }
+    }
+    app_log("%s\r\n", (found == 0U) ? " no devices" : "");
 }
 
 static void cmd_alarm(int argc, char *argv[])

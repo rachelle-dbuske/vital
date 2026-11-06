@@ -42,6 +42,7 @@ void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, ALARM_AUDIO_Pin|TP_VITALS_Pin, GPIO_PIN_RESET);
@@ -69,7 +70,16 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LED_GREEN_GPIO_Port, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : MAX_INT_Pin */
+  GPIO_InitStruct.Pin = MAX_INT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(MAX_INT_GPIO_Port, &GPIO_InitStruct);
+
   /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI8_IRQn, 6, 0);
+  HAL_NVIC_EnableIRQ(EXTI8_IRQn);
+
   HAL_NVIC_SetPriority(EXTI13_IRQn, 6, 0);
   HAL_NVIC_EnableIRQ(EXTI13_IRQn);
 

@@ -68,6 +68,13 @@ void Error_Handler(void);
 #define TP_VITALS_GPIO_Port GPIOC
 #define LED_GREEN_Pin GPIO_PIN_5
 #define LED_GREEN_GPIO_Port GPIOA
+#define MAX_INT_Pin GPIO_PIN_8
+#define MAX_INT_GPIO_Port GPIOA
+#define MAX_INT_EXTI_IRQn EXTI8_IRQn
+#define SENSOR_SCL_Pin GPIO_PIN_6
+#define SENSOR_SCL_GPIO_Port GPIOB
+#define SENSOR_SDA_Pin GPIO_PIN_7
+#define SENSOR_SDA_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 
