@@ -126,8 +126,6 @@ static void sampling_task(void *arg)
         }
         wd_checkin(WD_SAMPLE);
         vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(SAMPLE_PERIOD_MS));
-
-        vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(SAMPLE_PERIOD_MS));
     }
 }
 
