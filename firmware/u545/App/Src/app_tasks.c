@@ -10,7 +10,6 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
-#include "semphr.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -20,16 +19,25 @@
 #define SAMPLE_PERIOD_MS          10U    /* 100 Hz (REQ-SNS-01) */
 #define SAMPLE_NOTIFY_TIMEOUT_MS 100U
 #define SAMPLE_QUEUE_LENGTH       32U    /* 320 ms of buffering */
+#define LOG_QUEUE_LENGTH          32U
+#define LOG_MESSAGE_SIZE         128U
 #define STATS_WINDOW_SAMPLES     100U    /* 1 s of samples */
 #define STREAM_RAW                 0     /* 1 = stream samples for plotting */
 
 #define HB_TASK_STACK_WORDS      512U
 #define SAMPLE_TASK_STACK_WORDS  256U
 #define PROC_TASK_STACK_WORDS    512U
+#define UART_TASK_STACK_WORDS    384U
 
 #define HB_TASK_PRIORITY         (tskIDLE_PRIORITY + 2)
 #define PROC_TASK_PRIORITY       (tskIDLE_PRIORITY + 3)
 #define SAMPLE_TASK_PRIORITY     (tskIDLE_PRIORITY + 4)
+#define UART_TASK_PRIORITY       (tskIDLE_PRIORITY + 1)
+
+typedef struct {
+    uint16_t length;
+    char text[LOG_MESSAGE_SIZE];
+} app_log_message_t;
 
 /* ---------- Static storage (no heap) ---------- */
 static StaticTask_t  hbTaskTcb;
@@ -44,16 +52,22 @@ static StaticTask_t  procTaskTcb;
 static StackType_t   procTaskStack[PROC_TASK_STACK_WORDS];
 static TaskHandle_t  procTaskHandle;
 
-static StaticSemaphore_t uartMutexBuf;
-static SemaphoreHandle_t uartMutex;
+static StaticTask_t  uartTaskTcb;
+static StackType_t   uartTaskStack[UART_TASK_STACK_WORDS];
+static TaskHandle_t  uartTaskHandle;
 
 static StaticQueue_t sampleQueueBuf;
 static uint8_t       sampleQueueStorage[SAMPLE_QUEUE_LENGTH * sizeof(sensor_sample_t)];
 static QueueHandle_t sampleQueue;
 
+static StaticQueue_t logQueueBuf;
+static uint8_t       logQueueStorage[LOG_QUEUE_LENGTH * sizeof(app_log_message_t)];
+static QueueHandle_t logQueue;
+
 /* Diagnostics */
 static volatile uint32_t droppedSamples = 0;   /* REQ-SNS-03 */
 static volatile uint32_t readErrors     = 0;
+static volatile uint32_t droppedLogMessages = 0;
 static volatile bool periodicLog = true;
 
 static ppg_t        ppg;            /* static: too large for the task stack */
@@ -72,23 +86,43 @@ static void queue_sample(sensor_sample_t *sample)
 /* ---------- Thread-safe logging ---------- */
 void app_log(const char *fmt, ...)
 {
-    char buf[128];
+    if (logQueue == NULL) {
+        return;
+    }
+
+    app_log_message_t message;
     va_list args;
 
     va_start(args, fmt);
-    int len = vsnprintf(buf, sizeof(buf), fmt, args);
+    int len = vsnprintf(message.text, sizeof(message.text), fmt, args);
     va_end(args);
 
     if (len <= 0) {
         return;
     }
-    if (len >= (int)sizeof(buf)) {
-        len = (int)sizeof(buf) - 1;
+    if (len >= (int)sizeof(message.text)) {
+        len = (int)sizeof(message.text) - 1;
     }
 
-    xSemaphoreTake(uartMutex, portMAX_DELAY);
-    HAL_UART_Transmit(&huart1, (uint8_t *)buf, (uint16_t)len, HAL_MAX_DELAY);
-    xSemaphoreGive(uartMutex);
+    message.length = (uint16_t)len;
+    if (xQueueSend(logQueue, &message, 0U) != pdPASS) {
+        taskENTER_CRITICAL();
+        droppedLogMessages++;
+        taskEXIT_CRITICAL();
+    }
+}
+
+static void uart_output_task(void *arg)
+{
+    (void)arg;
+    app_log_message_t message;
+
+    for (;;) {
+        if (xQueueReceive(logQueue, &message, portMAX_DELAY) == pdPASS) {
+            (void)HAL_UART_Transmit(&huart1, (uint8_t *)message.text,
+                                    message.length, HAL_MAX_DELAY);
+        }
+    }
 }
 
 /* ---------- Tasks ---------- */
@@ -223,12 +257,16 @@ static void processing_task(void *arg)
 /* ---------- Creation (call before the scheduler starts) ---------- */
 void app_tasks_create(void)
 {
-    uartMutex = xSemaphoreCreateMutexStatic(&uartMutexBuf);
-    configASSERT(uartMutex != NULL);
+    logQueue = xQueueCreateStatic(LOG_QUEUE_LENGTH, sizeof(app_log_message_t),
+                                  logQueueStorage, &logQueueBuf);
+    configASSERT(logQueue != NULL);
 
     sampleQueue = xQueueCreateStatic(SAMPLE_QUEUE_LENGTH, sizeof(sensor_sample_t),
                                      sampleQueueStorage, &sampleQueueBuf);
     configASSERT(sampleQueue != NULL);
+
+    uartTaskHandle = xTaskCreateStatic(uart_output_task, "uart_tx", UART_TASK_STACK_WORDS, NULL,
+                                       UART_TASK_PRIORITY, uartTaskStack, &uartTaskTcb);
 
     hbTaskHandle = xTaskCreateStatic(heartbeat_task, "heartbeat", HB_TASK_STACK_WORDS, NULL,
                                      HB_TASK_PRIORITY, hbTaskStack, &hbTaskTcb);
@@ -239,6 +277,7 @@ void app_tasks_create(void)
     procTaskHandle = xTaskCreateStatic(processing_task, "process", PROC_TASK_STACK_WORDS, NULL,
                                        PROC_TASK_PRIORITY, procTaskStack, &procTaskTcb);
 
+    configASSERT(uartTaskHandle   != NULL);
     configASSERT(hbTaskHandle     != NULL);
     configASSERT(sampleTaskHandle != NULL);
     configASSERT(procTaskHandle   != NULL);
@@ -264,6 +303,9 @@ void app_print_stats(void)
             (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS));
     app_log("samples dropped: %lu | read errors: %lu\r\n",
             (unsigned long)droppedSamples, (unsigned long)readErrors);
+        app_log("log queue: %lu/%u | dropped log messages: %lu\r\n",
+            (unsigned long)uxQueueMessagesWaiting(logQueue), (unsigned int)LOG_QUEUE_LENGTH,
+            (unsigned long)droppedLogMessages);
     app_log("stack free (words): hb=%lu smp=%lu proc=%lu\r\n",
             (unsigned long)uxTaskGetStackHighWaterMark(hbTaskHandle),
             (unsigned long)uxTaskGetStackHighWaterMark(sampleTaskHandle),

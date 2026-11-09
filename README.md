@@ -29,10 +29,10 @@ https://github.com/user-attachments/assets/2d32a519-a399-49e9-9b1a-a44a48677e25
 
 ## Highlights
 
-- **6 static FreeRTOS tasks** with rate-based priorities; no dynamic allocation after startup
+- **7 static FreeRTOS tasks** with rate-based priorities; no dynamic allocation after startup
 - **Heart rate and SpO2 algorithm** in hardware-independent C: DC tracking, beat detection with an adaptive threshold, ratio-of-ratios SpO2, finger and signal-quality detection
 - **Alarm system** modeled on IEC 60601-1-8 concepts: physiological vs. technical alarms with distinct indications, priority, hysteresis, a 2-minute audio pause, and configurable limits with safety bounds
-- **Watchdog supervisor**: every task checks in through an event group; a missed check-in triggers the safe state within 500 ms (worst case), backed by the hardware IWDG
+- **Watchdog supervisor**: every monitored task checks in through an event group; a missed check-in triggers the safe state within 500 ms (worst case), backed by the hardware IWDG
 - **Fault record that survives reset** (`.noinit` RAM) and is reported on the next boot
 - **Fault injection from the CLI**: hang any task, including the supervisor, on demand
 - **44 unit tests** on the host, named by requirement ID, run with coverage in GitHub Actions alongside a full firmware build
@@ -43,7 +43,7 @@ https://github.com/user-attachments/assets/2d32a519-a399-49e9-9b1a-a44a48677e25
 
 ```mermaid
 flowchart LR
-    S["MAX30102 sensor<br/>(simulated today)"] -->|I2C| U
+    S["MAX30102 sensor<br/>(simulator optional)"] -->|I2C| U
     subgraph U["STM32U545 (FreeRTOS)"]
         direction TB
         SA[sample] -->|queue| PR[process]
@@ -66,9 +66,10 @@ All tasks are created with static allocation. Scheduling is preemptive: the high
 |:---:|---|---|---|---|
 | 6 | `supervisor` | Every 250 ms | Checks all task check-ins, kicks the IWDG, enters the safe state on a miss | Must preempt everything to detect any hung task, including the alarm task |
 | 5 | `alarm` | Notification from `process`, button interrupt, 25 ms tick | Evaluates limits, drives the alarm outputs, handles audio pause | Safety output must never wait behind data processing |
-| 4 | `sample` | Every 10 ms (`vTaskDelayUntil`) | Reads the sensor, queues the sample | Strict 100 Hz timing; a late sample distorts the signal |
+| 4 | `sample` | MAX30102 PPG-ready interrupt (hardware); 10 ms timer (simulator) | Reads the sensor, queues the sample | Keeps real sampling paced by sensor data-ready; simulator is rate-based |
 | 3 | `process` | Sample queue | Filtering, beat detection, HR and SpO2, publishes vitals | Variable workload; the 32-sample queue absorbs jitter |
 | 2 | `heartbeat` | Every 5 s | Prints stack high-water marks | Diagnostics only |
+| 1 | `uart_tx` | Log queue | Transmits queued log messages | Keeps blocking UART transmission out of other tasks |
 | 1 | `cli` | UART stream buffer | Parses and runs commands | Human-speed input |
 
 ### Inter-task communication
@@ -76,14 +77,16 @@ All tasks are created with static allocation. Scheduling is preemptive: the high
 | Mechanism | From → To | Purpose |
 |---|---|---|
 | Queue (32 samples) | `sample` → `process` | Decouples strict sampling from variable processing |
-| Task notification | `process`, EXTI13 ISR → `alarm` | Immediate wake-up on new vitals or a button press |
+| Task notification | EXTI8 ISR → `sample`; `process` and EXTI13 ISR → `alarm` | Wake sampling on sensor data-ready; wake alarm on new vitals or a button press |
 | Stream buffer | USART1 ISR → `cli` | Moves received bytes out of interrupt context |
+| Queue (32 messages) | Application tasks → `uart_tx` | Defers log transmission to a low-priority task; full queue drops and counts messages |
 | Event group | monitored tasks → `supervisor` | Watchdog check-ins |
-| Mutex | any task → UART | Prevents interleaved log output |
+
+Emergency safe-state messages bypass the log queue and use the direct UART fault path.
 
 ### Interrupt priorities
 
-Interrupts that call FreeRTOS APIs (USART1, EXTI13) run at NVIC priority 6, below `configMAX_SYSCALL_INTERRUPT_PRIORITY` (5). Interrupt handlers do the minimum and defer work to tasks.
+Interrupts that call FreeRTOS APIs (USART1, EXTI8, EXTI13) run at NVIC priority 6, below `configMAX_SYSCALL_INTERRUPT_PRIORITY` (5). Interrupt handlers do the minimum and defer work to tasks.
 
 ---
 
