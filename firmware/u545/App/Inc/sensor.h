@@ -12,6 +12,7 @@ typedef struct {
 
 typedef enum {
     SENSOR_OK = 0,
+    SENSOR_NO_DATA,
     SENSOR_ERR_NOT_FOUND,   /* identity check failed (REQ-SNS-02) */
     SENSOR_ERR_COMM         /* bus or read error */
 } sensor_status_t;

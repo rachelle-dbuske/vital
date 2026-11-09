@@ -18,6 +18,7 @@
 
 /* ---------- Configuration ---------- */
 #define SAMPLE_PERIOD_MS          10U    /* 100 Hz (REQ-SNS-01) */
+#define SAMPLE_NOTIFY_TIMEOUT_MS 100U
 #define SAMPLE_QUEUE_LENGTH       32U    /* 320 ms of buffering */
 #define STATS_WINDOW_SAMPLES     100U    /* 1 s of samples */
 #define STREAM_RAW                 0     /* 1 = stream samples for plotting */
@@ -59,6 +60,14 @@ static ppg_t        ppg;            /* static: too large for the task stack */
 static ppg_result_t latestResult;   /* shared with other tasks */
 
 static uint32_t latestPublishedMs;
+
+static void queue_sample(sensor_sample_t *sample)
+{
+    sample->tick = (uint32_t)xTaskGetTickCount();
+    if (xQueueSend(sampleQueue, sample, 0) != pdPASS) {
+        droppedSamples++;
+    }
+}
 
 /* ---------- Thread-safe logging ---------- */
 void app_log(const char *fmt, ...)
@@ -111,21 +120,41 @@ static void sampling_task(void *arg)
         vTaskSuspend(NULL);
     }
 
+#if VITAL_USE_SIM_SENSOR
     TickType_t lastWake = xTaskGetTickCount();
+#endif
 
     for (;;) {
+#if VITAL_USE_SIM_SENSOR
         if (sensor_read(&sample) == SENSOR_OK) {
-            sample.tick = (uint32_t)xTaskGetTickCount();
-
-            /* Never block here: if the consumer falls behind, count the loss. */
-            if (xQueueSend(sampleQueue, &sample, 0) != pdPASS) {
-                droppedSamples++;
-            }
+            queue_sample(&sample);
         } else {
             readErrors++;
         }
         wd_checkin(WD_SAMPLE);
         vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(SAMPLE_PERIOD_MS));
+#else
+        const uint32_t notifications = (uint32_t)ulTaskNotifyTake(
+            pdTRUE, pdMS_TO_TICKS(SAMPLE_NOTIFY_TIMEOUT_MS));
+        wd_checkin(WD_SAMPLE);
+        if (notifications == 0U) {
+            continue;
+        }
+
+        for (;;) {
+            const sensor_status_t status = sensor_read(&sample);
+            if (status == SENSOR_NO_DATA) {
+                break;
+            }
+            if (status != SENSOR_OK) {
+                readErrors++;
+                break;
+            }
+
+            queue_sample(&sample);
+            wd_checkin(WD_SAMPLE);
+        }
+#endif
     }
 }
 
@@ -213,6 +242,15 @@ void app_tasks_create(void)
     configASSERT(hbTaskHandle     != NULL);
     configASSERT(sampleTaskHandle != NULL);
     configASSERT(procTaskHandle   != NULL);
+}
+
+void app_sample_task_notify_from_isr(void)
+{
+    BaseType_t higherPriorityTaskWoken = pdFALSE;
+    if (sampleTaskHandle != NULL) {
+        (void)vTaskNotifyGiveFromISR(sampleTaskHandle, &higherPriorityTaskWoken);
+    }
+    portYIELD_FROM_ISR(higherPriorityTaskWoken);
 }
 
 void app_set_periodic_log(bool enabled)

@@ -10,9 +10,13 @@
 #define MAX30102_ADDRESS              (0x57U << 1)
 #define MAX30102_I2C_TIMEOUT_MS        10U
 #define MAX30102_RESET_TIMEOUT_MS      50U
-#define MAX30102_SAMPLE_TIMEOUT_MS     20U
 
+#define MAX30102_REG_INT_STATUS_1      0x00U
+#define MAX30102_REG_INT_STATUS_2      0x01U
+#define MAX30102_REG_INT_ENABLE_1      0x02U
+#define MAX30102_REG_INT_ENABLE_2      0x03U
 #define MAX30102_REG_FIFO_WR_PTR       0x04U
+#define MAX30102_REG_FIFO_OVF_COUNTER  0x05U
 #define MAX30102_REG_FIFO_RD_PTR       0x06U
 #define MAX30102_REG_FIFO_DATA         0x07U
 #define MAX30102_REG_FIFO_CONFIG       0x08U
@@ -25,6 +29,7 @@
 #define MAX30102_PART_ID               0x15U
 #define MAX30102_MODE_RESET            0x40U
 #define MAX30102_MODE_SPO2             0x03U
+#define MAX30102_INT_PPG_READY         0x40U
 #define MAX30102_FIFO_POINTER_MASK     0x1FU
 #define MAX30102_FIFO_CONFIG           0x0FU
 #define MAX30102_SPO2_CONFIG           0x27U
@@ -46,7 +51,7 @@ static HAL_StatusTypeDef write_register(uint8_t reg, uint8_t value)
 static HAL_StatusTypeDef clear_fifo(void)
 {
     if (write_register(MAX30102_REG_FIFO_WR_PTR, 0U) != HAL_OK ||
-        write_register(0x05U, 0U) != HAL_OK ||
+        write_register(MAX30102_REG_FIFO_OVF_COUNTER, 0U) != HAL_OK ||
         write_register(MAX30102_REG_FIFO_RD_PTR, 0U) != HAL_OK) {
         return HAL_ERROR;
     }
@@ -86,8 +91,17 @@ sensor_status_t sensor_init(void)
         write_register(MAX30102_REG_SPO2_CONFIG, MAX30102_SPO2_CONFIG) != HAL_OK ||
         write_register(MAX30102_REG_LED1_PA, MAX30102_LED_CURRENT) != HAL_OK ||
         write_register(MAX30102_REG_LED2_PA, MAX30102_LED_CURRENT) != HAL_OK ||
+        write_register(MAX30102_REG_INT_ENABLE_1, 0U) != HAL_OK ||
+        write_register(MAX30102_REG_INT_ENABLE_2, 0U) != HAL_OK ||
         clear_fifo() != HAL_OK ||
         write_register(MAX30102_REG_MODE_CONFIG, MAX30102_MODE_SPO2) != HAL_OK) {
+        return SENSOR_ERR_COMM;
+    }
+
+    uint8_t int_status[2];
+    if (read_registers(MAX30102_REG_INT_STATUS_1, int_status,
+                       (uint16_t)sizeof(int_status)) != HAL_OK ||
+        write_register(MAX30102_REG_INT_ENABLE_1, MAX30102_INT_PPG_READY) != HAL_OK) {
         return SENSOR_ERR_COMM;
     }
 
@@ -100,24 +114,19 @@ sensor_status_t sensor_read(sensor_sample_t *out)
         return SENSOR_ERR_COMM;
     }
 
-    const uint32_t wait_start = HAL_GetTick();
-    for (;;) {
-        uint8_t write_ptr;
-        uint8_t read_ptr;
-        if (read_registers(MAX30102_REG_FIFO_WR_PTR, &write_ptr, 1U) != HAL_OK ||
-            read_registers(MAX30102_REG_FIFO_RD_PTR, &read_ptr, 1U) != HAL_OK) {
-            return SENSOR_ERR_COMM;
-        }
+    uint8_t int_status[2];
+    uint8_t write_ptr;
+    uint8_t read_ptr;
+    if (read_registers(MAX30102_REG_INT_STATUS_1, int_status,
+                       (uint16_t)sizeof(int_status)) != HAL_OK ||
+        read_registers(MAX30102_REG_FIFO_WR_PTR, &write_ptr, 1U) != HAL_OK ||
+        read_registers(MAX30102_REG_FIFO_RD_PTR, &read_ptr, 1U) != HAL_OK) {
+        return SENSOR_ERR_COMM;
+    }
 
-        if ((write_ptr & MAX30102_FIFO_POINTER_MASK) !=
-            (read_ptr & MAX30102_FIFO_POINTER_MASK)) {
-            break;
-        }
-
-        if ((HAL_GetTick() - wait_start) >= MAX30102_SAMPLE_TIMEOUT_MS) {
-            return SENSOR_ERR_COMM;
-        }
-        vTaskDelay(pdMS_TO_TICKS(1U));
+    if ((write_ptr & MAX30102_FIFO_POINTER_MASK) ==
+        (read_ptr & MAX30102_FIFO_POINTER_MASK)) {
+        return SENSOR_NO_DATA;
     }
 
     uint8_t fifo_data[MAX30102_FIFO_SAMPLE_BYTES];

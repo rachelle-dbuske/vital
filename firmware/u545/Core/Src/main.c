@@ -29,6 +29,7 @@
 /* USER CODE BEGIN Includes */
 #include "fault.h"
 #include "alarm_task.h"
+#include "app_tasks.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -221,6 +222,13 @@ void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin)
     if (GPIO_Pin == USER_BUTTON_Pin) {
         alarm_task_button_from_isr();
     }
+}
+
+void HAL_GPIO_EXTI_Falling_Callback(uint16_t GPIO_Pin)
+{
+  if (GPIO_Pin == MAX_INT_Pin) {
+    app_sample_task_notify_from_isr();
+  }
 }
 /* USER CODE END 4 */
 

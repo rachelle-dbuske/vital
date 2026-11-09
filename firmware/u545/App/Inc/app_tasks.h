@@ -6,6 +6,7 @@
 #include "ppg.h"
 
 void app_tasks_create(void);
+void app_sample_task_notify_from_isr(void);
 void app_log(const char *fmt, ...);
 void app_print_stats(void);
 void app_set_periodic_log(bool enabled);
