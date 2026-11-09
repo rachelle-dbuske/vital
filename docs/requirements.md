@@ -133,9 +133,9 @@ To be completed as implementation proceeds.
 
 | Requirement | Implementation | Test | Status |
 |---|---|---|---|
-| REQ-SNS-01 | app_tasks.c: sampling_task | Pending | Implemented (sim) |
-| REQ-SNS-02 | app_tasks.c: sampling_task, sensor.h | Pending | Interface only |
-| REQ-SNS-03 | app_tasks.c: sampling_task (droppedSamples) | Manual: drop=0 over 10 min | Implemented |
+| REQ-SNS-01 | app_tasks.c: sampling_task; max30102.c: sensor_read | Manual: Teleplot showed raw red/IR pulse and HR 68 BPM; sample rate not measured | Real sensor waveform observed in polling mode; 100 Hz ±1% and interrupt-driven timing pending |
+| REQ-SNS-02 | max30102.c: sensor_init (PART_ID register 0xFF) | Manual: i2cid returned ready=0, read=0, PART_ID=0x15; real backend produced samples | Verified on hardware |
+| REQ-SNS-03 | app_tasks.c: sampling_task (droppedSamples/readErrors); max30102.c: FIFO read | Manual: stats showed drop=0 and read errors=0 during hardware waveform/HR session | No loss observed in polling-mode session; 10-minute endurance and interrupt-mode verification pending |
 | REQ-COM-05 | cli.c: cli_task, command table | Manual: CLI test session (Step 7) | Implemented |
 | REQ-FLT-01 | watchdog.c: supervisor_task; fault.c: safe_state_enter | Manual: fault hang cli/sample (Step 11) | Implemented; latency measurement pending |
 | REQ-FLT-03 | app_tasks.c: vApplicationStackOverflowHook → safe_state_enter | Manual: undersized stack | Implemented |
